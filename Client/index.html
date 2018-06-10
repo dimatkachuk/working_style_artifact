@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+	<head>
+    <!-- META TAGS -->
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <!-- keywords for search engines-->
+      <meta name="keywords" content="...">
+      <!-- description for search engines-->
+      <meta name="description" content="...">
+    <!---------------->
+
+    <!-- Page TITLE -->
+      <title> Working Style Artifacts </title>
+    <!---------------->
+
+    <!-- LINKS -->
+      <!-- stylesheet links -->
+			<link rel="stylesheet" type="text/css" href="styles/common.css">
+		  <link rel="stylesheet" type="text/css" href="styles/index.css">
+      <!-- fonts links -->
+			<link href="https://fonts.googleapis.com/css?family=Pacifico|Roboto:300,500" rel="stylesheet">
+      <!----------->
+			<link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.0.10/css/all.css" integrity="sha384-+d0P83n9kaQMCwj8F4RJB66tzIwOKmrdb46+porD/OvrJ+37WqIM7UoBtwHO6Nlg" crossorigin="anonymous">
+			<!-- jQuery -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+	</head>
+	<body>
+    <div id='interaction-container'>
+			<div id='menu'>
+				<div class='logo'>
+					<div class='logo-button-container'>
+						<button id='show-measures'>Show CA measures</button>
+					</div>
+					<p>Working Style Artifact</p>
+					<div class='logo-button-container'>
+						<button id='show-initial-wsa' onclick="restoreWSA()">Show initial WSA</button>
+					</div>
+				</div>
+				<div id='controls'>
+					<button class='active' onclick="updateCustomization('kernel')"> Kernels </button>
+				 	<button onclick="updateCustomization('kernel-sequence')"> Kernel Sequences</button>
+				</div>
+				<div id='customization-container'>
+					<div id='kernel-slider'>
+					</div>
+					<div id='activations'>
+					</div>
+				</div>
+				<div id='abreviations'>
+					<div class='abreviation'>
+						TH - threshold
+					</div>
+					<div class='abreviation'>
+						TD - total density
+	 				</div>
+					<div class='abreviation'>
+						RD - relative density
+					</div>
+				</div>
+			</div>
+			<div id='main-container'>
+				<div id='metadata-container'>
+					<p> Metadata </p>
+					<div id='metadata-activities'>
+					</div>
+					<div id='metadata-performers'>
+					</div>
+				</div>
+				<div id='artifact-container'>
+				</div>
+			</div>
+    </div>
+		<div id='uploading-container'>
+			<div id='info-container'>
+				<div class='logo'>
+					Working Style Artifact
+				</div>
+				<p id='info-p'>
+					Welcome to universal tool for identification of patterns and counting measures conected to working style of your organization.<br>
+					To start upload your event log file. Note, that your log file, should have next file extension:
+					.csv, .xes, .mxml. <br> Moreover, csv file should contain column names in as first row
+				</p>
+			</div>
+			<div id='file-upload-container'>
+				<div id='input-file-container'>
+					<label class="fileContainer">
+    				Upload file
+    				<input type="file" id='log-file'/>
+					</label>
+					<div id='submit-button'>
+						Submit
+					</div>
+					<p id='chosen-file'></p>
+				</div>
+				<div id='column-choice-container'>
+					<p id='column-choice-p'>
+						We have identified next names of columns to proceed.
+							In case of mistake please choose column yourself.
+					</p>
+					<p id='column-choice-p-important'>
+					</p>
+					<div id='choices'>
+						<div class='column-choice'>
+							<p> Case column name </p>
+							<select id='case-select'>
+							</select>
+						</div>
+						<div class='column-choice'>
+							<p> Activity column name </p>
+							<select id='activity-select'>
+							</select>
+						</div>
+						<div class='column-choice'>
+							<p> Performer column name </p>
+							<select id='performer-select'>
+							</select>
+						</div>
+					</div>
+					<div id='submit-choices-button'>
+						Submit
+					</div>
+				</div>
+			</div>
+		</div>
+		<script type="text/javascript" src='scripts/log_file_input.js'></script>
+  </body>
+</html>
