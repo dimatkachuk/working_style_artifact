@@ -1,5 +1,7 @@
 const host = 'http://127.0.0.1:5000/';
 
+var act_figure_size = 35;
+
 var file_to_send = '';
 var extension_to_send = '';
 var max_size = 60;
@@ -11,6 +13,8 @@ var colors = [];
 var shapes = [];
 
 var wsa = [];
+var total = 0;
+var total_active = 0;
 var kernels = [
   {
     threshold: 3,
@@ -23,14 +27,19 @@ var kernels = [
   }
 ];
 var active_kernel = -1;
-var activations_list = []
-current_highlight = []
+var activations_list = [];
+var activations_sorting = 'no-sorting';
+var activations_before_sorting = [];
+var editor_relation_num = 2;
+var unseen_all = false;
+current_highlight = [];
+initial_kernel_highlight = [];
 
 var kernel_sequences = [
   {
     name: 'Act1 -> param',
     number: 0,
-    threshold: 2,
+    threshold: 1,
     kernels: [
       {
         tl: 'x',
@@ -45,9 +54,16 @@ var kernel_sequences = [
         br: '*',
       }
     ],
-    relations: ['strict'],
+    relations: ['.','strict'],
   },
 ];
+var active_kernel_sequence = -1;
+var activation_sequences_list = [];
+var activation_sequences_sorting = 'no-sorting';
+var activation_sequences_before_sorting = [];
+var unseen_all_sequences = false;
+
+
 
 var editor_warnings = {
   name: false,
@@ -65,10 +81,22 @@ $(document).ready(() => {
   });
 });
 
+function clone (existingArray) {
+   var newObj = (existingArray instanceof Array) ? [] : {};
+   for (i in existingArray) {
+      if (i == 'clone') continue;
+      if (existingArray[i] && typeof existingArray[i] == "object") {
+         newObj[i] = clone(existingArray[i]);
+      } else {
+         newObj[i] = existingArray[i]
+      }
+   }
+   return newObj;
+}
+
 // Section 1. File upload and preprocessing /////////////////////////////////
 
 function getFile() {
-  console.log('File reading started');
   var logFile = $('#log-file').prop('files')[0];
   var extension = logFile.name.split('.')[1];
   extension_to_send = extension;
@@ -77,7 +105,6 @@ function getFile() {
     $('#column-choice-container').css('display','flex');
     processFile(logFile, extension);
   } else { // If file has wrong extension
-    console.log('Unaccepted file extension!');
     $('#chosen-file').html("Unfortunatelly, only files with extension .csv, .xes, and .mxml can be processed. Choose another file.")
   }
 }
@@ -90,7 +117,6 @@ function checkFileExtension(ext) {
 //Direct file to different processing function depending on file extention,
 // then get columns
 function processFile(file, extension) {
-  console.log('File processing started');
   if (extension == 'csv') {
     processCSV(file);
   } else if (extension == 'xes') {
@@ -115,7 +141,6 @@ function processCSV(file) {
         }
     }
     reader.onerror = function (evt) {
-      console.log('Error while reading CSV file on client-side');
       $('#file-status').html("Something went wrong, please try to reload the website");
     }
   }
@@ -132,15 +157,12 @@ function proceedColumns(columns) {
     var lcColumnName = columns[colNum].toLowerCase();
     if (lcColumnName.includes('case')) {
       caseColumnName = columns[colNum];
-      console.log('Case column: ', caseColumnName);
     }
     if (lcColumnName.includes('activity')) {
       activityColumnName = columns[colNum];
-      console.log('Activity column: ', activityColumnName);
     }
     if (lcColumnName.includes('performer') || lcColumnName.includes('resource')) {
       performerColumnName = columns[colNum];
-      console.log('Performer column: ', performerColumnName);
     }
   }
   columnsShow(columns, caseColumnName, activityColumnName, performerColumnName);
@@ -177,7 +199,6 @@ function addOptions(name, selector, columns, str) {
 // Section 2. Server communication /////////////////////////////////
 
 function send_file_json() {
-  console.log('Sending log file to server');
   caseColumnName = $('#case-select').val();
   activityColumnName = $('#activity-select').val();
   performerColumnName = $('#performer-select').val();
@@ -197,15 +218,52 @@ function send_file_json() {
       shapes = response.shapes;
       colors = response.colors;
       wsa = {matrix: response.matrix, nrows: response.nrows, ncols: response.ncols}
-      console.log('WSA: ', wsa.matrix);
-      console.log('Rows: ', wsa.nrows);
-      console.log('Cols: ', wsa.ncols);
+      total = response.total;
+      kernels[0].total_active = response.total_active;
+      kernel_sequences[0].total_active = response.total_active_seq;
       activations_list.push(response.activations);
+      for (act_indx in activations_list) {
+        activations = activations_list[act_indx].activations;
+        for (act_indx in activations) {
+          activation = activations[act_indx];
+          highlight_size = 0;
+          for (row_indx in activation.area) {
+            for (col_indx in activation.area[row_indx]) {
+              highlight_size += activation.area[row_indx][col_indx];
+            }
+          }
+          activation.td = activation.number*highlight_size / total;
+          activation.rd = activation.number*highlight_size / kernels[0].total_active
+        }
+      }
+      console.log('Activations list', activations_list);
+      activation_sequences_list.push(response.activation_sequences);
+      highlight_size = 0;
+      for (act_seq_indx in activation_sequences_list) {
+        activation_sequence = activation_sequences_list[act_seq_indx];
+        for (act_indx in activation_sequence.activations) {
+          activation = activation_sequence.activations[act_indx];
+          relation_indx = parseInt(act_indx) + 1;
+          if (act_indx !== (kernel_sequences[kernel_sequence_number].kernels.length-1) && kernel_sequences[kernel_sequence_number].relations[relation_indx] === 'strict') {
+            for (row_indx in activation.area) {
+              highlight_size += activation.area[row_indx][0];
+            }
+          } else {
+            for (row_indx in activation.area) {
+              for (col_indx in activation.area[row_indx]) {
+                highlight_size += activation.area[row_indx][col_indx];
+              }
+            }
+          }
+        }
+        activation_sequence.td = activation_sequence.number*highlight_size / total;
+        activation_sequence.rd = activation_sequence.number*highlight_size / kernel_sequences[0].total_active
+      }
       var highlights = [];
       for(var i=0; i<wsa.nrows; i++) {
         highlights[i] = [];
         for(var j=0; j<wsa.ncols; j++) {
-          highlights[i][j] = 1;
+          highlights[i][j] = 2;
         }
       }
       current_highlight = highlights;
@@ -217,14 +275,12 @@ function send_file_json() {
         shape += '</svg><p>' + shapes[indx] + ': ' + indx + '</p></div>'
         $('#metadata-activities').append(shape);
       }
-      console.log('Activities', shapes);
       for (indx in colors) {
         color = '<p class="metadata-color" style="color:' + colors[indx] + '">';
         color += indx;
         color += '</p>'
         $('#metadata-performers').append(color);
       }
-      console.log('Performers', colors);
     }
   })
 
@@ -257,15 +313,26 @@ function generateCells(matrix, highlights) {
 
 function generateCell(cell, x, y, highlight) {
   cell_svg = '';
-  if (highlight == 0 && cell[0] != 'none') {
-    color = 'rgb(176,176,178);';
-  } else if (cell[0] == 'none') {
-    color = 'rgb(255,255,255);'
+  if (highlight === 0 && cell[0] != 'none') {
+    color = 'rgb(176,176,178)';
+  } else if (cell[0] === 'none') {
+    color = 'rgb(255,255,255)'
+  } else if (highlight === 1) {
+    color = 'rgb(125,132,145)';
   } else {
     color = cell[1];
   }
   cell_svg += getFigure(cell[0], color, cell[2], max_size, x, y);
+  if (highlight > 2) {
+    cell_svg += getRedPoint(x,y);
+  }
   return(cell_svg)
+}
+
+function getRedPoint(x,y) {
+  x_coord = x + 7;
+  y_coord = y + 7;
+  return '<circle cx="' + x_coord +'" cy="' + y_coord +'" r="5" style="fill:#AF2344"/>';
 }
 
 function getFigure(shape, color, size, max_size, x, y) {
@@ -276,8 +343,9 @@ function getFigure(shape, color, size, max_size, x, y) {
   case 's1': // Square
     x_coord = x + center*(1-size);
     y_coord = y + center*(1-size);
-    s_size = 2*(center-(x_coord-x));
-    figure += '<rect x="'+x_coord+'" y="'+y_coord+'" width="'+s_size+'" height="'+s_size+'" style="fill:'+color+';" />';
+    s_w_size = 2*(center-(x_coord-x));
+    s_h_size = 2*(center-(x_coord-x));
+    figure += '<rect x="'+x_coord+'" y="'+y_coord+'" width="'+s_w_size+'" height="'+s_h_size+'" style="fill:'+color+';" />';
     break;
   case 's2':  // Circle
     cx_coord = x + center;
@@ -372,7 +440,7 @@ function getFigure(shape, color, size, max_size, x, y) {
     x_coord = x + center*(1-size);
     y_coord = y + center*(1-size);
     s_size = 2*(center-(x_coord-x));
-    figure += '<rect x="'+x_coord+'" y="'+y_coord+'" width="'+s_size+'" height="'+s_size+'" style="fill:'+color+';" />';
+    figure += '<rect x="'+ (x_coord + 10) +'" y="'+y_coord+'" width="'+ '6px' +'" height="'+s_size+'" style="fill:'+color+';" />';
     break;
   default:
     x_coord = x + center*(1-size)
@@ -388,7 +456,6 @@ function getFigure(shape, color, size, max_size, x, y) {
 // Section *. customization
 
 function updateCustomization(what) {
-  console.log('Controls:', $('#controls button'));
   fbutton = $('#controls button')[0];
   sbutton = $('#controls button')[1];
   if (what == 'kernel') {
@@ -399,7 +466,7 @@ function updateCustomization(what) {
     for (k_indx in kernels) {
       $('#kernel-slider').append(getKernel(kernels[k_indx]));
     }
-    $('#kernel-slider').append('<div id="kernel-editor-button" clickable onclick="openEditor()">+</div>')
+    $('#kernel-slider').append('<div id="kernel-editor-button" clickable onclick="openEditor(false)">+</div>')
   } else if (what == 'kernel-sequence') {
     $(fbutton).removeClass('active');
     $(sbutton).addClass('active');
@@ -412,23 +479,48 @@ function updateCustomization(what) {
   }
 }
 
-function openEditor() {
-  if (active_kernel != -1) {
+function openEditor(withKernel) {
+  if (!withKernel && active_kernel != -1) {
     current_k_id = '#kernel-' + active_kernel;
     $(current_k_id).removeClass('active');
   }
   editor = '<div id="kernel-editor">';
   editor += '<p>Kernel editor</p>';
   // Kernel name and threshold
-  editor += 'Kernel name: <input id="editor-kernel-name"></input>';
-  editor += 'Kernel threshold: <input id="editor-kernel-threshold"></input>';
+  editor += 'Kernel name: <input id="editor-kernel-name" ';
+  if (withKernel) {
+    editor += 'value="' + kernels[active_kernel].name + '"';
+  }
+  editor += '>';
+  editor += 'Kernel threshold: <input id="editor-kernel-threshold" ';
+  if (withKernel) {
+    editor += 'value="' + kernels[active_kernel].threshold + '"';
+  }
+  editor += '>';
   // Kernel itself
+  console.log(kernels[active_kernel]);
   editor += '<div id="editor-kernel-container">';
   editor += '<div id="editor-kernel">';
-  editor += '<input class="editor-kernel-cell">';
-  editor += '<input class="editor-kernel-cell">';
-  editor += '<input class="editor-kernel-cell">';
-  editor += '<input class="editor-kernel-cell">';
+  editor += '<input class="editor-kernel-cell" ';
+  if (withKernel) {
+    editor += 'value="' + kernels[active_kernel].tl + '"';
+  }
+  editor += '>';
+  editor += '<input class="editor-kernel-cell" ';
+  if (withKernel) {
+    editor += 'value="' + kernels[active_kernel].tr + '"';
+  }
+  editor += '>';
+  editor += '<input class="editor-kernel-cell" ';
+  if (withKernel) {
+    editor += 'value="' + kernels[active_kernel].bl + '"';
+  }
+  editor += '>';
+  editor += '<input class="editor-kernel-cell" ';
+  if (withKernel) {
+    editor += 'value="' + kernels[active_kernel].br + '"';
+  }
+  editor += '>';
   editor += '</div></div>';
   //Instructions and warnings
   editor += '<p>Instructions</p>';
@@ -443,14 +535,239 @@ function openEditor() {
   editor += '<p>Warnings</p>';
   editor += '<div id="editor-warnings-container">';
   editor += '</div>';
-  editor += '<div id="editor-submit-container"><button id="editor-submit">Submit</button></div>'
+  editor += '<div id="editor-submit-container"><button id="editor-submit">'
+  if (withKernel) {
+    editor += 'Update';
+  } else {
+    editor += 'Submit';
+  }
+  editor += '</button>';
+  editor += '<button id ="editor-close">Close</button>'
   editor += '</div>';
-  $('#activations').empty().append(editor);
+  editor += '</div>';
+  $('#big-editor').css('display', 'flex');
+  $('#editor-container').empty().append(editor);
+  if (withKernel) {
+    checkName();
+    checkThreshold();
+    checkCells();
+  }
   checkWarnings();
   $('#editor-kernel-name').bind('paste keyup', checkName);
   $('#editor-kernel-threshold').bind('paste keyup', checkThreshold);
   $('.editor-kernel-cell').bind('paste keyup', checkCells);
-  $('#editor-submit').click(submitKernel);
+  if (withKernel) {
+    $('#editor-submit').click(updateKernel);
+  } else {
+    $('#editor-submit').click(submitKernel);
+  }
+  $('#editor-close').click(closeEditor);
+}
+
+function openSequenceEditor(withKernelSequence) {
+  if (!withKernelSequence && active_kernel_sequence != -1) {
+    current_k_s_id = '#kernel-sequence-' + active_kernel_sequence;
+    $(current_k_s_id).removeClass('active');
+  }
+  editor = '<div id="kernel-sequence-editor">';
+  editor += '<p>Kernel Sequence editor</p>';
+  // Kernel name and threshold
+  editor += 'Kernel sequence name: <input id="editor-kernel-sequence-name" ';
+  if (withKernelSequence) {
+    editor += 'value="' + kernel_sequences[active_kernel_sequence].name + '"';
+  }
+  editor += '>';
+  editor += 'Kernel sequence threshold: <input id="editor-kernel-sequence-threshold" ';
+  if (withKernelSequence) {
+    editor += 'value="' + kernel_sequences[active_kernel_sequence].threshold + '"';
+  }
+  editor += '>';
+  // Kernel itself
+  editor += '<div id="editor-kernel-sequence-container">';
+  if (withKernelSequence) {
+    kernel_sequence = kernel_sequences[active_kernel_sequence];
+    console.log('Kernl seq', kernel_sequence);
+    editor += '<div id="editor-kernel-sequence">';
+    for (indx in kernel_sequence.relations) {
+      if (kernel_sequence.relations[indx] === 'strict') {
+        editor += '<div class="editor-relation">';
+        editor += '<button class="editor-relation-button active" id="relation-button-strict-1" value="strict" onclick="changeRelationToStrict(1)">&#10233;</button>';
+        editor += '<button class="editor-relation-button" id="relation-button-nonstrict-1" value="non-strict" onclick="changeRelationToNonStrict(1)">&#10230;</button>';
+        editor += '</div>';
+      } else if (kernel_sequence.relations[indx] === 'non-strict') {
+        editor += '<div class="editor-relation">';
+        editor += '<button class="editor-relation-button" id="relation-button-strict-1" value="strict" onclick="changeRelationToStrict(1)">&#10233;</button>';
+        editor += '<button class="editor-relation-button active" id="relation-button-nonstrict-1" value="non-strict" onclick="changeRelationToNonStrict(1)">&#10230;</button>';
+        editor += '</div>';
+      }
+      kernel = kernel_sequence.kernels[indx];
+      editor += '<div class="editor-kernel">';
+        editor += '<input class="editor-kernel-cell" ';
+        editor += 'value="' + kernel.tl + '"';
+        editor += '>';
+        editor += '<input class="editor-kernel-cell" ';
+        editor += 'value="' + kernel.tr + '"';
+        editor += '>';
+        editor += '<input class="editor-kernel-cell" ';
+        editor += 'value="' + kernel.bl + '"';
+        editor += '>';
+        editor += '<input class="editor-kernel-cell" ';
+        editor += 'value="' + kernel.br + '"';
+        editor += '>';
+      editor += '</div>';
+    }
+    editor += '</div>';
+  } else {
+    editor += '<div id="editor-kernel-sequence">';
+      // First kernel
+      editor += '<div class="editor-kernel">';
+        editor += '<input class="editor-kernel-cell" ';
+        // if (withKernel) {
+        //   editor += 'value="' + kernels[active_kernel].tl + '"';
+        // }
+        editor += '>';
+        editor += '<input class="editor-kernel-cell" ';
+        // if (withKernel) {
+        //   editor += 'value="' + kernels[active_kernel].tr + '"';
+        // }
+        editor += '>';
+        editor += '<input class="editor-kernel-cell" ';
+        // if (withKernel) {
+        //   editor += 'value="' + kernels[active_kernel].bl + '"';
+        // }
+        editor += '>';
+        editor += '<input class="editor-kernel-cell" ';
+        // if (withKernel) {
+        //   editor += 'value="' + kernels[active_kernel].br + '"';
+        // }
+        editor += '>';
+      editor += '</div>';
+    // Relation
+      editor += '<div class="editor-relation">';
+      editor += '<button class="editor-relation-button active" id="relation-button-strict-1" value="strict" onclick="changeRelationToStrict(1)">&#10233;</button>';
+      editor += '<button class="editor-relation-button" id="relation-button-nonstrict-1" value="non-strict" onclick="changeRelationToNonStrict(1)">&#10230;</button>';
+      editor += '</div>';
+
+      // Second kernel
+      editor += '<div class="editor-kernel">';
+        editor += '<input class="editor-kernel-cell" ';
+        // if (withKernel) {
+        //   editor += 'value="' + kernels[active_kernel].tl + '"';
+        // }
+        editor += '>';
+        editor += '<input class="editor-kernel-cell" ';
+        // if (withKernel) {
+        //   editor += 'value="' + kernels[active_kernel].tr + '"';
+        // }
+        editor += '>';
+        editor += '<input class="editor-kernel-cell" ';
+        // if (withKernel) {
+        //   editor += 'value="' + kernels[active_kernel].bl + '"';
+        // }
+        editor += '>';
+        editor += '<input class="editor-kernel-cell" ';
+        // if (withKernel) {
+        //   editor += 'value="' + kernels[active_kernel].br + '"';
+        // }
+        editor += '>';
+        editor += '</div>';
+    editor += '</div>';
+  }
+  editor += '<button id="add-kernel-sequence-button" onclick="addKernelToSequence(';
+  editor += editor_relation_num;
+  editor += ')">+</button>';
+  editor += '</div>';
+  //Instructions and warnings
+  editor += '<p>Instructions</p>';
+  // editor += '<div id="editor-instructions-container">';
+  // editor += '1. Specify name and threshold (>=1) <br>';
+  // editor += '2. Fullfil kernel cells. Note each cell can be of three types (use specification in brackets): <br>';
+  // editor += '&nbsp; 2.1 Cell can represent any event (use *). Note such cell would not be highlighted! <br>';
+  // editor += '&nbsp; 2.2 Cell can be parametric (use one of x,y,z or w) <br>';
+  // editor += '&nbsp; 2.3 Cell can specify activities and performers separately. You can specify numerous activities or performers or use parameter. For activities please use shortcut written in metadata. (s1/s2;x) <br>';
+  // editor += '3. Make sure there is no warnings in section below and then submit kernel <br>';
+  // editor += '</div>';
+  editor += '<p>Warnings</p>';
+  editor += '<div id="editor-warnings-container">';
+  editor += '</div>';
+  editor += '<div id="editor-submit-container"><button id="editor-submit">'
+  if (withKernelSequence) {
+    editor += 'Update';
+  } else {
+    editor += 'Submit';
+  }
+  editor += '</button>';
+  editor += '<button id="editor-close">Close</button>';
+  editor += '</div>';
+  editor += '</div>';
+  $('#big-editor').css('display', 'flex');
+  $('#editor-container').empty().append(editor);
+  // if (withKernel) {
+  //   checkName();
+  //   checkThreshold();
+  //   checkCells();
+  // }
+  // checkWarnings();
+  // $('#editor-kernel-name').bind('paste keyup', checkName);
+  // $('#editor-kernel-threshold').bind('paste keyup', checkThreshold);
+  // $('.editor-kernel-cell').bind('paste keyup', checkCells);
+  if (withKernelSequence) {
+    $('#editor-submit').click(updateKernelSequence);
+  } else {
+    $('#editor-submit').click(submitKernelSequence);
+  }
+  $('#editor-close').click(closeEditor);
+}
+
+function addKernelToSequence(relation_num) {
+  editor = '<div class="editor-relation">';
+  editor += '<button class="editor-relation-button active" id="relation-button-strict-';
+  editor += relation_num;
+  editor += '" value="strict" onclick="changeRelationToStrict(';
+  editor += relation_num;
+  editor += ')">&#10233;</button>';
+  editor += '<button class="editor-relation-button" id="relation-button-nonstrict-';
+  editor += relation_num;
+  editor += '" value="non-strict" onclick="changeRelationToNonStrict(';
+  editor += relation_num;
+  editor += ')">&#10230;</button>';
+  editor += '</div>';
+  editor += '<div class="editor-kernel">';
+  editor += '<input class="editor-kernel-cell" ';
+  // if (withKernel) {
+  //   editor += 'value="' + kernels[active_kernel].tl + '"';
+  // }
+  editor += '>';
+  editor += '<input class="editor-kernel-cell" ';
+  // if (withKernel) {
+  //   editor += 'value="' + kernels[active_kernel].tr + '"';
+  // }
+  editor += '>';
+  editor += '<input class="editor-kernel-cell" ';
+  // if (withKernel) {
+  //   editor += 'value="' + kernels[active_kernel].bl + '"';
+  // }
+  editor += '>';
+  editor += '<input class="editor-kernel-cell" ';
+  // if (withKernel) {
+  //   editor += 'value="' + kernels[active_kernel].br + '"';
+  // }
+  editor += '>';
+  editor += '</div>';
+  editor_relation_num += 1;
+  $('#editor-kernel-sequence').append(editor);
+}
+
+function changeRelationToStrict(number) {
+  console.log('strict');
+  $('#relation-button-strict-' + number).addClass('active');
+  $('#relation-button-nonstrict-' + number).removeClass('active');
+}
+
+function changeRelationToNonStrict(number) {
+  console.log('nonstrict');
+  $('#relation-button-nonstrict-' + number).addClass('active');
+  $('#relation-button-strict-' + number).removeClass('active');
 }
 
 function checkWarnings() {
@@ -606,7 +923,7 @@ function checkPerformers(performers) {
 }
 
 function submitKernel() {
-  console.log('Submission started');
+  $('#big-editor').css('display', 'none');
   name = $('#editor-kernel-name').val();
   threshold = $('#editor-kernel-threshold').val();
   cells_container = $('.editor-kernel-cell');
@@ -629,13 +946,225 @@ function submitKernel() {
     dataType: 'json',
     method: 'POST',
     success: function (response) {
-      console.log('Kernel submitted');
       kernels.push({threshold: parseInt(threshold), tl: cells[0], tr: cells[1], bl: cells[2], br: cells[3], number: kernels.length, name: name});
+      kernels[kernels.length - 1].total_active = response.total_active;
       activations_list.push(response.activations);
-      console.log('New activation list', activations_list);
-      console.log('New Kernels list', kernels);
+      console.log('List', activations_list);
+      for (act_indx in activations_list) {
+        activations = activations_list[act_indx].activations;
+        for (act_indx in activations) {
+          activation = activations[act_indx];
+          highlight_size = 0;
+          for (row_indx in activation.area) {
+            for (col_indx in activation.area[row_indx]) {
+              highlight_size += activation.area[row_indx][col_indx];
+            }
+          }
+          activation.td = activation.number*highlight_size / total;
+          activation.rd = activation.number*highlight_size / kernels[kernels.length-1].total_active
+        }
+      }
       updateCustomization('kernel');
       changeKernel(kernels.length - 1);
+      editor_warnings = {
+        name: false,
+        threshold: false,
+        right_threshold: true,
+        cells: false,
+        right_cells: true,
+      };
+    }
+  })
+}
+
+function submitKernelSequence() {
+  $('#big-editor').css('display', 'none');
+  name = $('#editor-kernel-sequence-name').val();
+  console.log('Name', name);
+  threshold = $('#editor-kernel-sequence-threshold').val();
+  console.log('Threshold', threshold);
+  cells_container = $('.editor-kernel-cell');
+  kernels_number = cells_container.length / 4;
+  kernels = [];
+  for (var i = 0; i < kernels_number; i++) {
+    kernels.push([]);
+    kernels[i].push(cells_container[i*4].value);
+    kernels[i].push(cells_container[i*4 + 1].value);
+    kernels[i].push(cells_container[i*4 + 2].value);
+    kernels[i].push(cells_container[i*4 + 3].value);
+  }
+  relations_container = $('.editor-relation-button.active');
+  relations = ['.'];
+  for (var i = 0; i <  relations_container.length; i++) {
+    relations.push(relations_container[i].value);
+  }
+  console.log('Relations', relations);
+  console.log('Kernels', kernels);
+  $.ajax({
+    url: host + 'kernel_sequence',
+    data: JSON.stringify({
+      case: caseColumnName,
+      activity: activityColumnName,
+      performer: performerColumnName,
+      extension: extension_to_send,
+      file: file_to_send,
+      threshold: parseInt(threshold),
+      kernels: kernels,
+      relations: relations,
+      number: kernels.length,
+    }),
+    dataType: 'json',
+    method: 'POST',
+    success: function (response) {
+      console.log('Success');
+      console.log('response', response);
+      kernels_to_put = [];
+      for (var i = 0; i < kernels_number; i++) {
+        kernel = {
+          tl: kernels[i][0],
+          tr: kernels[i][1],
+          bl: kernels[i][2],
+          br: kernels[i][3],
+        }
+        kernels_to_put.push(kernel);
+      }
+      kernel_sequences.push({threshold: parseInt(threshold), kernels: kernels_to_put, relations: relations, number: kernel_sequences.length, name: name});
+      console.log('K Seq', kernel_sequences);
+      kernel_sequences[kernel_sequences.length - 1].total_active = response.total_active_seq;
+      activation_sequences_list.push(response.activation_sequences);
+      console.log('Act seq list', activation_sequences_list);
+      updateCustomization('kernel-sequence');
+      changeKernelSequence(kernel_sequences.length - 1);
+      // editor_warnings = {
+      //   name: false,
+      //   threshold: false,
+      //   right_threshold: true,
+      //   cells: false,
+      //   right_cells: true,
+      // };
+    }
+  })
+}
+
+
+function updateKernelSequence() {
+  $('#big-editor').css('display', 'none');
+  name = $('#editor-kernel-sequence-name').val();
+  console.log('Name', name);
+  threshold = $('#editor-kernel-sequence-threshold').val();
+  console.log('Threshold', threshold);
+  cells_container = $('.editor-kernel-cell');
+  kernels_number = cells_container.length / 4;
+  kernels = [];
+  for (var i = 0; i < kernels_number; i++) {
+    kernels.push([]);
+    kernels[i].push(cells_container[i*4].value);
+    kernels[i].push(cells_container[i*4 + 1].value);
+    kernels[i].push(cells_container[i*4 + 2].value);
+    kernels[i].push(cells_container[i*4 + 3].value);
+  }
+  relations_container = $('.editor-relation-button.active');
+  relations = ['.'];
+  for (var i = 0; i <  relations_container.length; i++) {
+    relations.push(relations_container[i].value);
+  }
+  console.log('Relations', relations);
+  console.log('Kernels', kernels);
+  $.ajax({
+    url: host + 'kernel_sequence',
+    data: JSON.stringify({
+      case: caseColumnName,
+      activity: activityColumnName,
+      performer: performerColumnName,
+      extension: extension_to_send,
+      file: file_to_send,
+      threshold: parseInt(threshold),
+      kernels: kernels,
+      relations: relations,
+      number: kernels.length,
+    }),
+    dataType: 'json',
+    method: 'POST',
+    success: function (response) {
+      console.log('Success');
+      console.log('response', response);
+      kernels_to_put = [];
+      for (var i = 0; i < kernels_number; i++) {
+        kernel = {
+          tl: kernels[i][0],
+          tr: kernels[i][1],
+          bl: kernels[i][2],
+          br: kernels[i][3],
+        }
+        kernels_to_put.push(kernel);
+      }
+      kernel_sequences[active_kernel_sequence] = {threshold: parseInt(threshold), kernels: kernels_to_put, relations: relations, number: active_kernel_sequence, name: name};
+      console.log('K Seq', kernel_sequences);
+      kernel_sequences[active_kernel_sequence].total_active = response.total_active_seq;
+      activation_sequences_list[active_kernel_sequence] = response.activation_sequences;
+      console.log('Act seq current', active_kernel_sequence);
+      updateCustomization('kernel-sequence');
+      changeKernelSequence(active_kernel_sequence);
+      // editor_warnings = {
+      //   name: false,
+      //   threshold: false,
+      //   right_threshold: true,
+      //   cells: false,
+      //   right_cells: true,
+      // };
+    }
+  })
+}
+
+function closeEditor() {
+  $('#big-editor').css('display', 'none');
+}
+
+function updateKernel() {
+  console.log('Kernels',kernels);
+  $('#big-editor').css('display', 'none');
+  name = $('#editor-kernel-name').val();
+  threshold = $('#editor-kernel-threshold').val();
+  cells_container = $('.editor-kernel-cell');
+  var cells = [];
+  for (var i = 0; i < cells_container.length; i++) {
+    cells.push(cells_container[i].value);
+  }
+  $.ajax({
+    url: host + 'kernel',
+    data: JSON.stringify({
+      case: caseColumnName,
+      activity: activityColumnName,
+      performer: performerColumnName,
+      extension: extension_to_send,
+      file: file_to_send,
+      threshold: parseInt(threshold),
+      cells: cells,
+      number: kernels[active_kernel].number,
+    }),
+    dataType: 'json',
+    method: 'POST',
+    success: function (response) {
+      kernels[active_kernel] = {threshold: parseInt(threshold), tl: cells[0], tr: cells[1], bl: cells[2], br: cells[3], number: kernels[active_kernel].number, name: name};
+      kernels[active_kernel].total_active = response.total_active;
+      activations_list[active_kernel] = response.activations;
+      console.log('List', activations_list);
+      for (act_indx in activations_list) {
+        activations = activations_list[act_indx].activations;
+        for (act_indx in activations) {
+          activation = activations[act_indx];
+          highlight_size = 0;
+          for (row_indx in activation.area) {
+            for (col_indx in activation.area[row_indx]) {
+              highlight_size += activation.area[row_indx][col_indx];
+            }
+          }
+          activation.td = activation.number*highlight_size / total;
+          activation.rd = activation.number*highlight_size / kernels[active_kernel].total_active
+        }
+      }
+      updateCustomization('kernel');
+      changeKernel(active_kernel);
       editor_warnings = {
         name: false,
         threshold: false,
@@ -652,13 +1181,11 @@ function trunc(str) {
 }
 
 function getKernel(kernel) {
-  console.log(kernel);
   k = '<div class="kernel-container" clickable id="kernel-' + kernel.number + '" onclick="changeKernel(' + kernel.number + ')">';
   k += '<div class="kernel-info">';
   k += '<p>' + trunc(kernel.name) + '</p>';
   k += '<p>TH: ' + kernel.threshold + '</p>';
-  total = (wsa.nrows-1) * (wsa.ncols-1);
-  k += '<p>TD: </p>';
+  k += '<p>TD: ' + (kernel.total_active / total).toFixed(3) + '</p>';
   k += '</div>';
   k += '<div class="kernel">';
   k += getKernelCell(kernel.tl);
@@ -669,12 +1196,12 @@ function getKernel(kernel) {
 }
 
 function getKernelSequence(kernel_sequence) {
-  k = '<div class="kernel-sequence-container" clickable id="kernel-' + kernel_sequence.number + '" onclick="changeKernelSequence(' + kernel_sequence.number + ')">';
-  k += '<div class="kernel-info">';
+  console.log(kernel_sequence);
+  k = '<div class="kernel-sequence-container" clickable id="kernel-sequence-' + kernel_sequence.number + '" onclick="changeKernelSequence(' + kernel_sequence.number + ')">';
+  k += '<div class="kernel-sequence-info">';
   k += '<p>' + trunc(kernel_sequence.name) + '</p>';
   k += '<p>TH: ' + kernel_sequence.threshold + '</p>';
-  k += '<p>TD: </p>';
-  k += '<p>RD: </p>';
+  k += '<p>TD: ' + (kernel_sequence.total_active / total).toFixed(3) + '</p>';
   k += '</div>';
   k += '<div class="kernel-sequence">';
   k_seq_length = kernel_sequence.kernels.length;
@@ -688,8 +1215,9 @@ function getKernelSequence(kernel_sequence) {
     k += getKernelCell(seq_kernels[i].br);
     k += '</div>';
     if (i != k_seq_length - 1) {
-      k+= '<div class="relation">'
-        if (seq_relations[i] == 'strict') {
+      k+= '<div class="relation">';
+      console.log('Seq relation', seq_relations[i]);
+        if (seq_relations[i+1] === 'strict') {
           k += '&#10233;'
         } else {
           k += '&#10230;'
@@ -700,42 +1228,479 @@ function getKernelSequence(kernel_sequence) {
   return k + '</div></div>'
 }
 
+function changeKernel(kernel_num) {
+  previous_k_id = '#kernel-' + active_kernel;
+  $(previous_k_id).removeClass('active');
+  k_id = '#kernel-' + kernel_num;
+  $(k_id).addClass('active');
+  active_kernel = kernel_num;
+  activations = activations_list[active_kernel].activations;
+  activations_before_sorting = clone(activations);
+  highlight = activations_list[active_kernel].highlight;
+  getActivations(kernel_num);
+  current_highlight = clone(highlight);
+  for (row_indx in current_highlight) {
+    for (col_indx in current_highlight[row_indx]) {
+      if (current_highlight[row_indx][col_indx] > 0) {
+        current_highlight[row_indx][col_indx] += 1;
+      }
+    }
+  }
+  initial_kernel_highlight = clone(current_highlight);
+  redraw();
+  $('#show-initial-wsa').show();
+}
+
+function changeKernelSequence(kernel_seq_num) {
+  previous_k_s_id = '#kernel-sequence-' + active_kernel_sequence;
+  $(previous_k_s_id).removeClass('active');
+  k_s_id = '#kernel-sequence-' + kernel_seq_num;
+  $(k_s_id).addClass('active');
+  console.log('active seq', active_kernel_sequence);
+  console.log('passed seq', kernel_seq_num);
+  active_kernel_sequence = kernel_seq_num;
+  activation_sequences = activation_sequences_list[active_kernel_sequence].activation_sequences;
+  activation_sequences_before_sorting = clone(activation_sequences);
+  highlight = activation_sequences_list[active_kernel_sequence].highlight;
+  getActivationSequences(kernel_seq_num);
+  current_highlight = clone(highlight);
+  for (row_indx in current_highlight) {
+    for (col_indx in current_highlight[row_indx]) {
+      if (current_highlight[row_indx][col_indx] > 0) {
+        current_highlight[row_indx][col_indx] += 1;
+      }
+    }
+  }
+  initial_kernel_highlight = clone(current_highlight);
+  redraw();
+  $('#show-initial-wsa').show();
+}
+
+function sortActivationsByPerformer() {
+  // TODO: Check if need sorting by second, third or fourth element
+  row_to_sort_by = 0;
+  element_to_sort_by = 0;
+  let sorting_list = [];
+  colors_list = Object.values(colors);
+  for (let i = 0; i < Object.values(colors).length; i++) {
+    sorting_list.push([]);
+  }
+  for (act_indx in activations) {
+    activation = activations[act_indx];
+    color = activation.matrix[row_to_sort_by][element_to_sort_by][1];
+    index_to_put = colors_list.indexOf(color);
+    sorting_list[index_to_put].push(activation);
+  }
+  return [].concat.apply([], sorting_list);
+}
+
+function sortActivationSequencesByPerformer() {
+  // TODO: Check if need sorting by second, third or fourth element
+  activation_to_sort_by = 0;
+  row_to_sort_by = 0;
+  element_to_sort_by = 0;
+  let sorting_list = [];
+  colors_list = Object.values(colors);
+  for (let i = 0; i < Object.values(colors).length; i++) {
+    sorting_list.push([]);
+  }
+  activation_sequences = activation_sequences_list[active_kernel_sequence].activation_sequences;
+  for (act_seq_indx in activation_sequences) {
+    activation_sequence = activation_sequences[act_seq_indx];
+    activation = activation_sequence.activations[activation_to_sort_by];
+    color = activation.matrix[row_to_sort_by][element_to_sort_by][1];
+    index_to_put = colors_list.indexOf(color);
+    sorting_list[index_to_put].push(activation_sequence);
+  }
+  return [].concat.apply([], sorting_list);
+}
+
+function sortActivationsByActivity() {
+  // TODO: Check if need sorting by second, third or fourth element
+  row_to_sort_by = 0;
+  element_to_sort_by = 0;
+  let sorting_list = [];
+  for (let i = 0; i < Object.keys(shapes).length; i++) {
+    sorting_list.push([]);
+  }
+  for (act_indx in activations) {
+    activation = activations[act_indx];
+    index_to_put = parseInt((activation.matrix[row_to_sort_by][element_to_sort_by][0].slice(1,2))) - 1;
+    sorting_list[index_to_put].push(activation);
+  }
+  return [].concat.apply([], sorting_list);
+}
+
+function sortActivationSequencesByActivity() {
+  // TODO: Check if need sorting by second, third or fourth element
+  activation_to_sort_by = 0;
+  row_to_sort_by = 0;
+  element_to_sort_by = 0;
+  let sorting_list = [];
+  for (let i = 0; i < Object.keys(shapes).length; i++) {
+    sorting_list.push([]);
+  }
+  activation_sequences = activation_sequences_list[active_kernel_sequence].activation_sequences;
+  for (act_seq_indx in activation_sequences) {
+    activation_sequence = activation_sequences[act_seq_indx];
+    activation = activation_sequence.activations[activation_to_sort_by];
+    index_to_put = parseInt((activation.matrix[row_to_sort_by][element_to_sort_by][0].slice(1,2))) - 1;
+    sorting_list[index_to_put].push(activation_sequence);
+  }
+  return [].concat.apply([], sorting_list);
+}
+
+function sortActivationsByDensity(what) {
+  console.log('Act list', activations_list);
+
+  var len = activations_list[active_kernel].activations.length;
+  new_list = clone(activations_list[active_kernel].activations);
+  for (var i = len-1; i>=0; i--){
+    for(var j = 1; j<=i; j++){
+      if(new_list[j-1][what] < new_list[j][what]){
+          var temp = new_list[j-1];
+          new_list[j-1] = new_list[j];
+          new_list[j] = temp;
+       }
+    }
+  }
+  return new_list;
+}
+
+function bubbleSort(arr){
+   var len = arr.length;
+   for (var i = len-1; i>=0; i--){
+     for(var j = 1; j<=i; j++){
+       if(arr[j-1]>arr[j]){
+           var temp = arr[j-1];
+           arr[j-1] = arr[j];
+           arr[j] = temp;
+        }
+     }
+   }
+   return arr;
+}
+
+function getActivations(kernel_num) {
+  $('#activations').empty();
+  $('#activations').append(getActiovationsPanel(kernel_num));
+  var acts;
+  if (activations_sorting === 'performer') {
+    acts = sortActivationsByPerformer();
+  } else if (activations_sorting === 'activity') {
+    acts = sortActivationsByActivity();
+  } else if (activations_sorting === 'td') {
+    acts = sortActivationsByDensity('td');
+  } else if (activations_sorting === 'rd') {
+    acts = sortActivationsByDensity('rd');
+  } else {
+    acts = activations_before_sorting;
+  }
+  activations_list[active_kernel].activations = acts;
+  $('#activations').append('<div id="activations-list"></div>');
+  for (act_indx in acts) {
+    activation = acts[act_indx];
+    $('#activations-list').append(getActivation(activation, act_indx, kernel_num));
+  }
+}
+
+function getActivationSequences(kernel_seq_num) {
+  $('#activations').empty();
+  $('#activations').append(getActiovationSequencePanel(kernel_seq_num));
+  var act_sequences;
+  if (activation_sequences_sorting === 'performer') {
+    act_sequences = sortActivationSequencesByPerformer();
+  } else if (activation_sequences_sorting === 'activity') {
+    act_sequences = sortActivationSequencesByActivity();
+  } else {
+    act_sequences = activation_sequences_before_sorting;
+  }
+  activation_sequences_list[active_kernel_sequence].activation_sequences = act_sequences;
+  $('#activations').append('<div id="activation-sequences-list"></div>');
+  for (act_seq_indx in act_sequences) {
+    act_sequence = act_sequences[act_seq_indx];
+    console.log('each', act_sequence);
+    $('#activation-sequences-list').append(getActivationSequence(act_sequence, act_seq_indx, kernel_seq_num));
+  }
+}
+
+function getActiovationsPanel(kernel_num) {
+  p = '<div class="kernel-panel">';
+  p += '<label id="kernel-panel-label"><span>Kernel: </span>' + kernels[kernel_num].name + '</label>';
+  p += '<button onclick="openEditor(true)" id="update-kernel-button">Update kernel</button>';
+  p += '</div>';
+  p += '<p id="kernel-panel-title">Kernel Activations</p>'
+  p += '<div class="activations-panel">';
+  // Add select input for sorting
+  p += '<label class="sorting-label">Sort by:</label>';
+
+  p += '<button class="sorting-button';
+  if (activations_sorting ==='no-sorting') {
+    p += ' active';
+  }
+  p += '" id="sorting-button-no-sorting" onclick="changeSorting(0)">No sorting</button>';
+
+  p += '<button class="sorting-button';
+  if (activations_sorting ==='performer') {
+    p += ' active';
+  }
+  p += '" id="sorting-button-performer" onclick="changeSorting(1)">Performer</button>';
+
+  p += '<button class="sorting-button';
+  if (activations_sorting ==='activity') {
+    p += ' active';
+  }
+  p += '" id="sorting-button-activity" onclick="changeSorting(2)">Activity</button>';
+
+  p += '<button class="sorting-button';
+  if (activations_sorting ==='td') {
+    p += ' active';
+  }
+  p += '" id="sorting-button-td" onclick="changeSorting(3)">TD</button>';
+
+  p += '<button class="sorting-button';
+  if (activations_sorting ==='rd') {
+    p += ' active';
+  }
+  p += '" id="sorting-button-rd" onclick="changeSorting(4)">RD</button>';
+  // Add Unseen all button
+  p += '<button onclick="UnseenAll()" id="unseen-all-button">';
+  p += '<i class="fas fa-eye-slash fa-2x"></i>';
+  p+= '</button>';
+  p += '</div>'
+  return p;
+}
+
+function changeSorting(num) {
+  console.log('Change');
+  if (num === 0) {
+    sorting = 'no-sorting';
+  } else if (num === 1) {
+    sorting = 'performer';
+  } else if (num === 2) {
+    sorting = 'activity';
+  } else if (num === 3) {
+    sorting = 'td';
+  } else if (num === 4) {
+    sorting = 'rd';
+  }
+  activations_sorting = sorting;
+  getActivations(active_kernel);
+}
+
+function getActiovationSequencePanel(kernel_seq_num) {
+  p = '<div class="kernel-panel">';
+  p += '<label id="kernel-panel-label"><span>Kernel sequence: </span>' + kernel_sequences[kernel_seq_num].name + '</label>';
+  p += '<button onclick="openSequenceEditor(true)" id="update-kernel-button">Update kernel</button>';
+  p += '</div>';
+  p += '<p id="kernel-panel-title">Kernel Sequence Activations</p>'
+  p += '<div class="activations-panel">';
+  // Add select input for sorting
+  p += '<label class="sorting-label">Sort by:</label>';
+
+  p += '<button class="sorting-button';
+  if (activation_sequences_sorting ==='no-sorting') {
+    p += ' active';
+  }
+  p += '" id="sorting-button-no-sorting" onclick="changeSequenceSorting(0)">No sorting</button>';
+
+  p += '<button class="sorting-button';
+  if (activation_sequences_sorting ==='performer') {
+    p += ' active';
+  }
+  p += '" id="sorting-button-performer" onclick="changeSequenceSorting(1)">Performer</button>';
+
+  p += '<button class="sorting-button';
+  if (activation_sequences_sorting ==='activity') {
+    p += ' active';
+  }
+  p += '" id="sorting-button-activity" onclick="changeSequenceSorting(2)">Activity</button>';
+
+  p += '<button class="sorting-button';
+  if (activation_sequences_sorting ==='td') {
+    p += ' active';
+  }
+  p += '" id="sorting-button-td" onclick="changeSequenceSorting(3)">TD</button>';
+
+  p += '<button class="sorting-button';
+  if (activation_sequences_sorting ==='rd') {
+    p += ' active';
+  }
+  p += '" id="sorting-button-rd" onclick="changeSequenceSorting(4)">RD</button>';
+  // Add Unseen all button
+  p += '<button onclick="UnseenAllSequences()" id="unseen-all-button">';
+  p += '<i class="fas fa-eye-slash fa-2x"></i>';
+  p+= '</button>';
+  p += '</div>'
+  return p;
+}
+
+function changeSequenceSorting(num) {
+  console.log('Change');
+  if (num === 0) {
+    sorting = 'no-sorting';
+  } else if (num === 1) {
+    sorting = 'performer';
+  } else if (num === 2) {
+    sorting = 'activity';
+  } else if (num === 3) {
+    sorting = 'td';
+  } else if (num === 4) {
+    sorting = 'rd';
+  }
+  activation_sequences_sorting = sorting;
+  getActivationSequences(active_kernel_sequence);
+}
+
 function getActivation(activation, activation_number, kernel_number) {
   k = '<div class="activation-container" id="activation-' + kernel_number +'-' + activation_number + '">';
   k += '<div class="activation">';
   k += getActivationMatrix(activation.matrix);
   k += '</div>';
   k += '<div class="activation-info">';
-  k += '<p>TD: </p>';
-  k += '<p>RD: </p>';
+  highlight_size = 0;
+  for (row_indx in activation.area) {
+    for (col_indx in activation.area[row_indx]) {
+      highlight_size += activation.area[row_indx][col_indx];
+    }
+  }
+  k += '<p><span>TD:</span> ' + (activation.td).toFixed(3) + '</p>';
+  k += '<p><span>RD:</span> ' + (activation.rd).toFixed(3) + '</p>';
   k += '</div>';
   k += '<div class="activation-visibility">'
   if (activation.highlighted) {
-    k += '<i class="fas fa-eye fa-2x" onclick="toggleActivation(' + activation_number + ')"></i>'
+    k += '<i class="fas fa-eye fa-lg" onclick="toggleActivation(' + activation_number + ')"></i>'
   } else {
-    k += '<i class="fas fa-eye-slash fa-2x" onclick="toggleActivation(' + activation_number + ')"></i>'
-}
+    k += '<i class="fas fa-eye-slash fa-lg" onclick="toggleActivation(' + activation_number + ')"></i>'
+  }
   return k + '</div></div>'
+}
+
+function getActivationSequence(activation_sequence, activation_sequence_number, kernel_sequence_number) {
+  k = '<div class="activation-sequence-container" id="activation-sequence-';
+  k += kernel_sequence_number + '-' + activation_sequence_number + '">';
+  k += '<div class="activation-sequence">';
+  kernel_sequence = kernel_sequences[kernel_sequence_number];
+  for (act_indx in activation_sequence.activations) {
+    relation = kernel_sequence.relations[act_indx];
+    if (relation === 'strict') {
+      k += '<div class="relation">&#10233;</div>'
+    } else if (relation === 'non-strict') {
+      k += '<div class="relation">&#10230;</div>'
+    }
+    activation = activation_sequence.activations[act_indx];
+    k += '<div class="activation">';
+    k += getActivationMatrix(activation.matrix);
+    k += '</div>';
+  }
+  k += '</div>';
+  k += '<div class="activation-sequence-info">';
+  highlight_size = 0;
+  for (act_indx in activation_sequence.activations) {
+    activation = activation_sequence.activations[act_indx];
+    relation_indx = parseInt(act_indx) + 1;
+    if (act_indx !== (kernel_sequences[kernel_sequence_number].kernels.length-1) && kernel_sequences[kernel_sequence_number].relations[relation_indx] === 'strict') {
+      for (row_indx in activation.area) {
+        highlight_size += activation.area[row_indx][0];
+      }
+    } else {
+      for (row_indx in activation.area) {
+        for (col_indx in activation.area[row_indx]) {
+          highlight_size += activation.area[row_indx][col_indx];
+        }
+      }
+    }
+  }
+  k += '<p><span>TD:</span> ' + (activation_sequence.number*highlight_size / total).toFixed(3) + '</p>';
+  k += '<p><span>RD:</span> ' + (activation_sequence.number*highlight_size / kernel_sequence.total_active).toFixed(3) + '</p>';
+  k += '</div>';
+  k += '<div class="activation-visibility">'
+  if (activation_sequence.highlighted) {
+    k += '<i class="fas fa-eye fa-lg" onclick="toggleActivationSequence(' + activation_sequence_number + ')"></i>'
+  } else {
+    k += '<i class="fas fa-eye-slash fa-lg" onclick="toggleActivationSequence(' + activation_sequence_number + ')"></i>'
+  }
+  return k + '</div></div>'
+}
+
+function UnseenAll() {
+  activations = activations_list[active_kernel].activations;
+  for (act_indx in activations) {
+    activation = activations[act_indx];
+    coords = activation.coords;
+    area = activation.area;
+    act_id = '#activation-' + active_kernel + '-' + act_indx;
+    if (unseen_all) {
+      activation.highlighted = true;
+      $(act_id).find('.fa-eye-slash').removeClass('fa-eye-slash').addClass('fa-eye');
+    } else {
+      activation.highlighted = false;
+      $(act_id).find('.fa-eye').removeClass('fa-eye').addClass('fa-eye-slash');
+    }
+  }
+  activations_list[active_kernel].activations = activations;
+  if (unseen_all) {
+    unseen_all = false;
+    current_highlight = clone(initial_kernel_highlight);
+    $('#unseen-all-button').find('.fa-eye').removeClass('fa-eye').addClass('fa-eye-slash');
+  } else {
+    unseen_all = true;
+    for (row_indx in current_highlight) {
+      for (col_indx in highlight[row_indx]) {
+        if (current_highlight[row_indx][col_indx] > 0) {
+          current_highlight[row_indx][col_indx] = 1;
+        }
+      }
+    }
+    $('#unseen-all-button').find('.fa-eye-slash').removeClass('fa-eye-slash').addClass('fa-eye');
+  }
+  redraw();
+}
+
+function UnseenAllSequences() {
+  activation_sequences = activation_sequences_list[active_kernel_sequence].activation_sequences;
+  for (act_seq_indx in activation_sequences) {
+    activation_sequence = activation_sequences[act_seq_indx];
+    act_seq_id = '#activation-sequence-' + active_kernel_sequence + '-' + act_seq_indx;
+    if (unseen_all_sequences) {
+      activation_sequence.highlighted = true;
+      $(act_seq_id).find('.fa-eye-slash').removeClass('fa-eye-slash').addClass('fa-eye');
+    } else {
+      activation_sequence.highlighted = false;
+      $(act_seq_id).find('.fa-eye').removeClass('fa-eye').addClass('fa-eye-slash');
+    }
+  }
+  if (unseen_all_sequences) {
+    unseen_all_sequences = false;
+    current_highlight = clone(initial_kernel_highlight);
+    $('#unseen-all-button').find('.fa-eye').removeClass('fa-eye').addClass('fa-eye-slash');
+  } else {
+    unseen_all_sequences = true;
+    for (row_indx in current_highlight) {
+      for (col_indx in highlight[row_indx]) {
+        if (current_highlight[row_indx][col_indx] > 0) {
+          current_highlight[row_indx][col_indx] = 1;
+        }
+      }
+    }
+    $('#unseen-all-button').find('.fa-eye-slash').removeClass('fa-eye-slash').addClass('fa-eye');
+  }
+  redraw();
 }
 
 function toggleActivation(act_indx) {
   activation = activations_list[active_kernel].activations[act_indx];
-  console.log('Gighlight', current_highlight);
-  console.log('This activation', activation);
-  console.log(this.className);
   coords = activation.coords;
   area = activation.area;
   for (coord_indx in coords) {
     row = coords[coord_indx][0]
     col = coords[coord_indx][1]
     if (activation.highlighted) {
-      console.log('HIghlighted');
       current_highlight[row][col] -= area[0][0];
       current_highlight[row][col+1] -= area[0][1];
       current_highlight[row+1][col] -= area[1][0];
       current_highlight[row+1][col+1] -= area[1][1];
     } else {
-      console.log('Not yet HIghlighted');
       current_highlight[row][col] += area[0][0];
       current_highlight[row][col+1] += area[0][1];
       current_highlight[row+1][col] += area[1][0];
@@ -753,6 +1718,42 @@ function toggleActivation(act_indx) {
   }
 }
 
+function toggleActivationSequence(act_seq_indx) {
+  activation_sequence = activation_sequences_list[active_kernel_sequence].activation_sequences[act_seq_indx];
+  console.log(activation_sequence);
+  for (act_indx in activation_sequence.activations) {
+    activation = activation_sequence.activations[act_indx];
+    coords = activation.coords;
+    area = activation.area;
+    for (coord_indx in coords) {
+      row = coords[coord_indx][0]
+      col = coords[coord_indx][1]
+      if (activation_sequence.highlighted) {
+        activation.highlighted = false;
+        current_highlight[row][col] -= area[0][0];
+        current_highlight[row][col+1] -= area[0][1];
+        current_highlight[row+1][col] -= area[1][0];
+        current_highlight[row+1][col+1] -= area[1][1];
+      } else {
+        activation.highlighted = true;
+        current_highlight[row][col] += area[0][0];
+        current_highlight[row][col+1] += area[0][1];
+        current_highlight[row+1][col] += area[1][0];
+        current_highlight[row+1][col+1] += area[1][1];
+      }
+    }
+  }
+  redraw();
+  act_seq_id = '#activation-sequence-' + active_kernel_sequence + '-' + act_seq_indx;
+  if (activation_sequence.highlighted) {
+    activation_sequence.highlighted = false;
+    $(act_seq_id).find('.fa-eye').removeClass('fa-eye').addClass('fa-eye-slash');
+  } else {
+    $(act_seq_id).find('.fa-eye-slash').removeClass('fa-eye-slash').addClass('fa-eye');
+    activation_sequence.highlighted = true;
+  }
+}
+
 function getActivationMatrix(matrix) {
   matr = '';
   for (row_indx in matrix) {
@@ -764,8 +1765,8 @@ function getActivationMatrix(matrix) {
       } else if (cell == 'x_param' || cell == 'y_param' || cell == 'z_param' || cell == 'w_param') {
         c += cell.charAt(0);
       } else {
-        c += '<svg width="' + 40 + '" height="' + 40 + '">';
-        c += getFigure(cell[0], cell[1], 1, 40, 0, 0);
+        c += '<svg width="' + act_figure_size + '" height="' + act_figure_size + '">';
+        c += getFigure(cell[0], cell[1], 1, act_figure_size, 0, 0);
         c += '</svg>'
       }
       c += '</div>'
@@ -776,67 +1777,7 @@ function getActivationMatrix(matrix) {
 }
 
 function getKernelCell(cell) {
-  // c = ''
-  // if (cell == 'x' || cell == 'y' || cell == 'z' || cell == 'w') {
-  //   c += cell;
-  // } else if (cell == '*') {
-  //   c += 'any'
-  // } else {
-  //   res = cell.split(';');
-  //   activity = res[0];
-  //   console.log('Kernel to print activity', activity);
-  //   performer = res[1];
-  //   console.log('Kernel to print performer', performer);
-  //   if (activity == 'x' || activity == 'y' || activity == 'z' || activity == 'w') {
-  //     a = activity;
-  //   } else {
-  //     if (activity.indexOf('/') !== -1) {
-  //         all_activities = activity.split('/');
-  //         for (act_indx in all_activities) {
-  //           c += all_activities[act_indx] + ' ';
-  //         }
-  //     } else {
-  //       c += activity
-  //     }
-  //   }
-  //   if (performer == 'x' || performer == 'y' || performer == 'z' || performer == 'w') {
-  //     p = performer;
-  //   } else {
-  //     if (performer.indexOf('/') !== -1) {
-  //         all_performers = performer.split('/');
-  //         for (perf_indx in all_performers) {
-  //           c += all_pertformers[perf_indx] + ' ';
-  //         }
-  //     } else {
-  //       c += performer
-  //     }
-  //   }
-  // }
   return '<div class="kernel-cell">' + cell + '</div>'
-}
-
-function changeKernel(kernel_num) {
-  console.log(kernel_num);
-  console.log(active_kernel);
-  previous_k_id = '#kernel-' + active_kernel;
-  $(previous_k_id).removeClass('active');
-  k_id = '#kernel-' + kernel_num;
-  $(k_id).addClass('active');
-  active_kernel = kernel_num;
-  activations = activations_list[active_kernel].activations;
-  highlight = activations_list[active_kernel].highlight;
-  $('#activations').empty();
-  for (act_indx in activations) {
-    activation = activations[act_indx];
-    $('#activations').append(getActivation(activation, act_indx, kernel_num));
-  }
-  current_highlight = highlight;
-  redraw();
-  $('#show-initial-wsa').show();
-}
-
-function changeKernelSequence(kernel_seq_num) {
-
 }
 
 function restoreWSA() {
@@ -846,7 +1787,7 @@ function restoreWSA() {
   for(var i=0; i<wsa.nrows; i++) {
     highlights[i] = [];
     for(var j=0; j<wsa.ncols; j++) {
-      highlights[i][j] = 1;
+      highlights[i][j] = 2;
     }
   }
   current_highlight = highlights;
@@ -855,5 +1796,6 @@ function restoreWSA() {
 
 function redraw() {
   var svg = drawWSA(wsa.matrix, wsa.nrows, wsa.ncols, current_highlight);
+  console.log('current_highlight', current_highlight);
   $('#artifact-container').empty().append(svg);
 }
