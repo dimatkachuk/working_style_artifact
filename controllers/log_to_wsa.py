@@ -1,7 +1,7 @@
 import random
 from models import wsa as wsa
 
-def log_to_wsa(file_as_str, extension, case, activity, performer, timestamp='no timestamp'):
+def log_to_wsa(file_as_str, extension, case, activity, performer, timestamp='Time'):
     print('Processing log file...')
     if extension == 'csv':
         print('Extension: CSV')
@@ -12,6 +12,7 @@ def log_to_wsa(file_as_str, extension, case, activity, performer, timestamp='no 
         pass
     # for case in dict.keys():
     #     print(dict[case])
+    print('dict', dict)
     colors = get_colors(unique_elements['performers'])
     shapes = get_shapes(unique_elements['activities'])
     convert_timestamps(dict)
@@ -19,6 +20,16 @@ def log_to_wsa(file_as_str, extension, case, activity, performer, timestamp='no 
     return w, colors, shapes
 
 
+# def convert_xes(file):
+#     rows = file.split('\n')
+#     file = []
+#     case_indx = 0
+#     event_indx = 0
+#     for row in rows:
+#         if '<event>' in row:
+#             file.append([str(case_indx), '', '', ''])
+#         if ''
+#
 
 
 def read_csv(file, case_col, activity_col, performer_col, timestamp_col):
@@ -31,13 +42,13 @@ def read_csv(file, case_col, activity_col, performer_col, timestamp_col):
 
     # 1. Deriving columns indexes
     col_names = rows[0].split(';')
-    case_indx, activity_indx, performer_indx, timestamp_indx = 0,0,0,0
+    case_indx, activity_indx, performer_indx, timestamp_indx = -1,-1,-1,-1
     for indx in range(len(col_names)):
         if col_names[indx] == case_col:
             case_indx = indx
         elif col_names[indx] == activity_col:
             activity_indx = indx
-        elif  col_names[indx] == performer_col:
+        elif col_names[indx] == performer_col:
             performer_indx = indx
         elif col_names[indx] == timestamp_col:
             timestamp_indx = indx
@@ -47,15 +58,18 @@ def read_csv(file, case_col, activity_col, performer_col, timestamp_col):
         c = info[case_indx]
         a = info[activity_indx]
         p = info[performer_indx]
-        # t = row[timestamp_indx]
+        if timestamp_indx != -1:
+            t = info[timestamp_indx]
+        else:
+            t = 1
         if a not in unique_elems['activities']:
             unique_elems['activities'].append(a)
         if p not in unique_elems['performers']:
             unique_elems['performers'].append(p)
         if c in output.keys():
-            output[c].append(get_object(a,p,1))
+            output[c].append(get_object(a,p,int(t)))
         else:
-            output.update({c:[get_object(a,p,1)]})
+            output.update({c:[get_object(a,p,int(t))]})
         # if state == 'starts':
         #     if a not in unique_elems['activities']:
         #         unique_elems['activities'].append(a)

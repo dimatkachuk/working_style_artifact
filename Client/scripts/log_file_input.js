@@ -4,13 +4,25 @@ var act_figure_size = 35;
 
 var file_to_send = '';
 var extension_to_send = '';
-var max_size = 60;
+var max_size = 50;
 var caseColumnName = '';
 var activityColumnName = '';
 var performerColumnName = '';
 
 var colors = [];
 var shapes = [];
+
+var measures = [];
+
+var new_measure = {
+        'name': '',
+        'constituents': [true, false, false, false],
+        'ignored': [false, false, false],
+        'sizes': [true,true],
+        'values': [],
+        'total': 0,
+        'max_total': 0
+    }
 
 var wsa = [];
 var total = 0;
@@ -196,9 +208,35 @@ function addOptions(name, selector, columns, str) {
   return ''
 }
 
+function changeSize(n) {
+  if (n === 0) {
+    $('#size-button-0').addClass('active');
+    $('#size-button-1').removeClass('active');
+    $('#size-button-2').removeClass('active');
+    max_size = 50;
+    redraw();
+  } else if (n === 1) {
+    $('#size-button-0').removeClass('active');
+    $('#size-button-1').addClass('active');
+    $('#size-button-2').removeClass('active');
+    max_size = 60;
+    redraw();
+  } else {
+    $('#size-button-0').removeClass('active');
+    $('#size-button-1').removeClass('active');
+    $('#size-button-2').addClass('active');
+    max_size = 80;
+    redraw();
+  }
+}
+
 // Section 2. Server communication /////////////////////////////////
 
 function send_file_json() {
+  buttons = '<button id="size-button-0" class="size-button active" onclick="changeSize(0)">1x</button>';
+  buttons += '<button id="size-button-1" class="size-button" onclick="changeSize(1)">2x</button>';
+  buttons += '<button id="size-button-2" class="size-button" onclick="changeSize(2)">4x</button>';
+  $('#resize-container').append(buttons);
   caseColumnName = $('#case-select').val();
   activityColumnName = $('#activity-select').val();
   performerColumnName = $('#performer-select').val();
@@ -218,6 +256,8 @@ function send_file_json() {
       shapes = response.shapes;
       colors = response.colors;
       wsa = {matrix: response.matrix, nrows: response.nrows, ncols: response.ncols}
+      measures.push(response.measure);
+      console.log('measures', measures);
       total = response.total;
       kernels[0].total_active = response.total_active;
       kernel_sequences[0].total_active = response.total_active_seq;
@@ -236,7 +276,6 @@ function send_file_json() {
           activation.rd = activation.number*highlight_size / kernels[0].total_active
         }
       }
-      console.log('Activations list', activations_list);
       activation_sequences_list.push(response.activation_sequences);
       highlight_size = 0;
       for (act_seq_indx in activation_sequences_list) {
@@ -281,6 +320,7 @@ function send_file_json() {
         color += '</p>'
         $('#metadata-performers').append(color);
       }
+
     }
   })
 
@@ -458,25 +498,170 @@ function getFigure(shape, color, size, max_size, x, y) {
 function updateCustomization(what) {
   fbutton = $('#controls button')[0];
   sbutton = $('#controls button')[1];
+  tbutton = $('#controls button')[2];
   if (what == 'kernel') {
     $(sbutton).removeClass('active');
+    $(tbutton).removeClass('active');
     $(fbutton).addClass('active');
     $('#activations').empty();
     $('#kernel-slider').empty();
+    $('#kernel-slider').removeClass('line');
     for (k_indx in kernels) {
       $('#kernel-slider').append(getKernel(kernels[k_indx]));
     }
     $('#kernel-slider').append('<div id="kernel-editor-button" clickable onclick="openEditor(false)">+</div>')
   } else if (what == 'kernel-sequence') {
     $(fbutton).removeClass('active');
+    $(tbutton).removeClass('active');
     $(sbutton).addClass('active');
     $('#activations').empty();
     $('#kernel-slider').empty();
+    $('#kernel-slider').removeClass('line');
     for (k_indx in kernel_sequences) {
       $('#kernel-slider').append(getKernelSequence(kernel_sequences[k_indx]));
     }
     $('#kernel-slider').append('<div id="kernel-editor-button" clickable onclick="openSequenceEditor()">+</div>')
+  } else if (what === 'measures') {
+    $(fbutton).removeClass('active');
+    $(tbutton).addClass('active');
+    $(sbutton).removeClass('active');
+    $('#activations').empty();
+    $('#kernel-slider').empty();
+    $('#kernel-slider').addClass('line');
+    $('#activations').append(getUserMeasures());
+    $('#activations').append(getMeasureEditor());
   }
+}
+
+function submitMeasure() {
+  new_measure.name = $('#measure-editor-name').val();
+  $.ajax({
+    url: host + 'measure',
+    data: JSON.stringify({
+      case: caseColumnName,
+      activity: activityColumnName,
+      performer: performerColumnName,
+      extension: extension_to_send,
+      file: file_to_send,
+      measure: new_measure
+    }),
+    dataType: 'json',
+    method: 'POST',
+    success: function (response) {
+      measures.push(response.measure);
+      updateCustomization('measures');
+      new_measure = {
+              'name': '',
+              'constituents': [true, false, false, false],
+              'ignored': [false, false, false],
+              'sizes': [true,true],
+              'values': [],
+              'total': 0,
+              'max_total': 0
+          }
+    }
+  })
+}
+
+function getMeasureEditor() {
+  editor = '<div class="measure-editor-container">';
+    editor += '<p class="editor-name">Measure Editor</p>';
+    editor += 'Measure name: <input id="measure-editor-name"/>';
+    editor += '<div class="editor-buttons-container">';
+      editor += '<p class="editor-disclaimer">Ignore</p>';
+      editor += '<button class="editor-button" id="editor-ignore-0" onclick=ignoreMeasure(0)>Performers</button>';
+      editor += '<button class="editor-button" id="editor-ignore-1" onclick=ignoreMeasure(1)>Activities</button>';
+      editor += '<button class="editor-button" id="editor-ignore-2" onclick=ignoreMeasure(2)>Time</button>';
+    editor += '</div>';
+    editor += '<div class="editor-buttons-container">';
+      editor += '<p class="editor-disclaimer">Include measures</p>';
+      editor += '<button class="editor-button active" id="editor-measure-0" onclick=toggleMeasure(0)>x-axis</button>';
+      editor += '<button class="editor-button" id="editor-measure-1" onclick=toggleMeasure(1)>y-axis</button>';
+      editor += '<button class="editor-button" id="editor-measure-2" onclick=toggleMeasure(2)>diagonal</button>';
+      editor += '<button class="editor-button" id="editor-measure-3" onclick=toggleMeasure(3)>anti-diagonal</button>';
+    editor += '</div>';
+    editor += '<div class="editor-buttons-container">';
+      editor += '<p class="editor-disclaimer">Sizes</p>';
+      editor += '<button class="editor-button active" id="editor-size-0" onclick=toggleSize(0)>2x2</button>';
+      editor += '<button class="editor-button active" id="editor-size-1" onclick=toggleSize(1)>3x3</button>';
+    editor += '</div>';
+    editor += '<div class="submit-button-container">';
+    editor += '<button class="submit-button" onclick="submitMeasure()">Add measure</button>';
+    editor += '</div>';
+  editor += '</div>';
+  return editor;
+}
+
+function ignoreMeasure(n) {
+  new_measure.ignored[n] = !new_measure.ignored[n];
+  if (new_measure.ignored[n]) {
+    $('#editor-ignore-' + n).addClass('active');
+  } else {
+    $('#editor-ignore-' + n).removeClass('active');
+  }
+}
+
+function toggleMeasure(n) {
+  new_measure.constituents[n] = !new_measure.constituents[n];
+  if (new_measure.constituents[n]) {
+    $('#editor-measure-' + n).addClass('active');
+  } else {
+    $('#editor-measure-' + n).removeClass('active');
+  }
+}
+
+function toggleSize(n) {
+  new_measure.sizes[n] = !new_measure.sizes[n];
+  if (new_measure.sizes[n]) {
+    $('#editor-size-' + n).addClass('active');
+  } else {
+    $('#editor-size-' + n).removeClass('active');
+  }
+}
+
+function getUserMeasures() {
+  names = ['x-axis half-symmetry', 'y-axis half-symmetry', 'diagonal symmetry', 'anti-diagonal symmetry'];
+  ignore = ['performer ignored', 'activity ignored', 'time ignored'];
+  m = '';
+  for (m_indx in measures) {
+    measure = measures[m_indx];
+    console.log(measure);
+    m += '<div class="measure-container">';
+      m += '<div class="measure-info-column">';
+      m += '<p class="measure-name">'+ measure.name +'</p>';
+      for (c_indx in measure.constituents) {
+        present = measure.constituents[c_indx];
+        if (present) {
+          m += '<p class="measure-constituent">' + names[c_indx] + '</p>';
+        }
+      }
+      for (c_indx in measure.ignored) {
+        present = measure.ignored[c_indx];
+        if (present) {
+          m += '<p class="measure-ignore">' + ignore[c_indx] + '</p>';
+        }
+      }
+      m += '</div>';
+      m += '<div class="measure-value-column">';
+      for (s_indx in measure.sizes) {
+        size = parseInt(s_indx) + 2;
+        exists = measure.sizes[s_indx];
+        values = measure.values[s_indx];
+        if (exists) {
+          m += '<div class="measure-value-container">';
+          m += '<p class="measure-value-name">' + size + 'x' + size + '</p>';
+          m += '<p class="measure-value"><span>' + values[1].toFixed(2) + '</span> / ' + values[0].toFixed(2) + '</p>';
+          m += '</div>';
+        }
+      }
+      m += '<div class="measure-value-container">';
+      m += '<p class="measure-value-name">' + 'Total' + '</p>';
+      m += '<p class="measure-value"><span>' + measure.total.toFixed(2) + '</span> / ' + measure.max_total.toFixed(2) + '</p>';
+      m += '</div>';
+      m += '</div>';
+    m += '</div>';
+  }
+  return m;
 }
 
 function openEditor(withKernel) {
@@ -498,7 +683,6 @@ function openEditor(withKernel) {
   }
   editor += '>';
   // Kernel itself
-  console.log(kernels[active_kernel]);
   editor += '<div id="editor-kernel-container">';
   editor += '<div id="editor-kernel">';
   editor += '<input class="editor-kernel-cell" ';
@@ -586,18 +770,19 @@ function openSequenceEditor(withKernelSequence) {
   editor += '<div id="editor-kernel-sequence-container">';
   if (withKernelSequence) {
     kernel_sequence = kernel_sequences[active_kernel_sequence];
-    console.log('Kernl seq', kernel_sequence);
     editor += '<div id="editor-kernel-sequence">';
     for (indx in kernel_sequence.relations) {
+      console.log(kernel_sequence.relations[indx]);
+      console.log(indx);
       if (kernel_sequence.relations[indx] === 'strict') {
         editor += '<div class="editor-relation">';
-        editor += '<button class="editor-relation-button active" id="relation-button-strict-1" value="strict" onclick="changeRelationToStrict(1)">&#10233;</button>';
-        editor += '<button class="editor-relation-button" id="relation-button-nonstrict-1" value="non-strict" onclick="changeRelationToNonStrict(1)">&#10230;</button>';
+        editor += '<button class="editor-relation-button active" id="relation-button-strict-' + indx + '" value="strict" onclick="changeRelationToStrict(' + indx + ')">&#10233;</button>';
+        editor += '<button class="editor-relation-button" id="relation-button-nonstrict-' + indx + '" value="non-strict" onclick="changeRelationToNonStrict(' + indx + ')">&#10230;</button>';
         editor += '</div>';
       } else if (kernel_sequence.relations[indx] === 'non-strict') {
         editor += '<div class="editor-relation">';
-        editor += '<button class="editor-relation-button" id="relation-button-strict-1" value="strict" onclick="changeRelationToStrict(1)">&#10233;</button>';
-        editor += '<button class="editor-relation-button active" id="relation-button-nonstrict-1" value="non-strict" onclick="changeRelationToNonStrict(1)">&#10230;</button>';
+        editor += '<button class="editor-relation-button" id="relation-button-strict-' + indx + '" value="strict" onclick="changeRelationToStrict(' + indx + ')">&#10233;</button>';
+        editor += '<button class="editor-relation-button active" id="relation-button-nonstrict-' + indx + '" value="non-strict" onclick="changeRelationToNonStrict(' + indx + ')">&#10230;</button>';
         editor += '</div>';
       }
       kernel = kernel_sequence.kernels[indx];
@@ -720,6 +905,7 @@ function openSequenceEditor(withKernelSequence) {
 }
 
 function addKernelToSequence(relation_num) {
+  console.log('Relation number', relation_num);
   editor = '<div class="editor-relation">';
   editor += '<button class="editor-relation-button active" id="relation-button-strict-';
   editor += relation_num;
@@ -759,13 +945,11 @@ function addKernelToSequence(relation_num) {
 }
 
 function changeRelationToStrict(number) {
-  console.log('strict');
   $('#relation-button-strict-' + number).addClass('active');
   $('#relation-button-nonstrict-' + number).removeClass('active');
 }
 
 function changeRelationToNonStrict(number) {
-  console.log('nonstrict');
   $('#relation-button-nonstrict-' + number).addClass('active');
   $('#relation-button-strict-' + number).removeClass('active');
 }
@@ -949,7 +1133,6 @@ function submitKernel() {
       kernels.push({threshold: parseInt(threshold), tl: cells[0], tr: cells[1], bl: cells[2], br: cells[3], number: kernels.length, name: name});
       kernels[kernels.length - 1].total_active = response.total_active;
       activations_list.push(response.activations);
-      console.log('List', activations_list);
       for (act_indx in activations_list) {
         activations = activations_list[act_indx].activations;
         for (act_indx in activations) {
@@ -980,26 +1163,22 @@ function submitKernel() {
 function submitKernelSequence() {
   $('#big-editor').css('display', 'none');
   name = $('#editor-kernel-sequence-name').val();
-  console.log('Name', name);
   threshold = $('#editor-kernel-sequence-threshold').val();
-  console.log('Threshold', threshold);
   cells_container = $('.editor-kernel-cell');
   kernels_number = cells_container.length / 4;
-  kernels = [];
+  new_kernels = [];
   for (var i = 0; i < kernels_number; i++) {
-    kernels.push([]);
-    kernels[i].push(cells_container[i*4].value);
-    kernels[i].push(cells_container[i*4 + 1].value);
-    kernels[i].push(cells_container[i*4 + 2].value);
-    kernels[i].push(cells_container[i*4 + 3].value);
+    new_kernels.push([]);
+    new_kernels[i].push(cells_container[i*4].value);
+    new_kernels[i].push(cells_container[i*4 + 1].value);
+    new_kernels[i].push(cells_container[i*4 + 2].value);
+    new_kernels[i].push(cells_container[i*4 + 3].value);
   }
   relations_container = $('.editor-relation-button.active');
   relations = ['.'];
   for (var i = 0; i <  relations_container.length; i++) {
     relations.push(relations_container[i].value);
   }
-  console.log('Relations', relations);
-  console.log('Kernels', kernels);
   $.ajax({
     url: host + 'kernel_sequence',
     data: JSON.stringify({
@@ -1009,30 +1188,43 @@ function submitKernelSequence() {
       extension: extension_to_send,
       file: file_to_send,
       threshold: parseInt(threshold),
-      kernels: kernels,
+      kernels: new_kernels,
       relations: relations,
-      number: kernels.length,
+      number: new_kernels.length,
     }),
     dataType: 'json',
     method: 'POST',
     success: function (response) {
-      console.log('Success');
-      console.log('response', response);
       kernels_to_put = [];
       for (var i = 0; i < kernels_number; i++) {
         kernel = {
-          tl: kernels[i][0],
-          tr: kernels[i][1],
-          bl: kernels[i][2],
-          br: kernels[i][3],
+          tl: new_kernels[i][0],
+          tr: new_kernels[i][1],
+          bl: new_kernels[i][2],
+          br: new_kernels[i][3],
         }
         kernels_to_put.push(kernel);
       }
       kernel_sequences.push({threshold: parseInt(threshold), kernels: kernels_to_put, relations: relations, number: kernel_sequences.length, name: name});
-      console.log('K Seq', kernel_sequences);
       kernel_sequences[kernel_sequences.length - 1].total_active = response.total_active_seq;
       activation_sequences_list.push(response.activation_sequences);
-      console.log('Act seq list', activation_sequences_list);
+
+      for (act_seq_indx in activation_sequences_list) {
+        console.log('act list', activations_list[act_indx]);
+        // activations = activations_list[act_indx].activations;
+        // for (act_indx in activations) {
+        //   activation = activations[act_indx];
+        //   highlight_size = 0;
+        //   for (row_indx in activation.area) {
+        //     for (col_indx in activation.area[row_indx]) {
+        //       highlight_size += activation.area[row_indx][col_indx];
+        //     }
+        //   }
+        //   activation.td = activation.number*highlight_size / total;
+        //   activation.rd = activation.number*highlight_size / kernels[kernels.length-1].total_active
+        // }
+      }
+
       updateCustomization('kernel-sequence');
       changeKernelSequence(kernel_sequences.length - 1);
       // editor_warnings = {
@@ -1050,26 +1242,22 @@ function submitKernelSequence() {
 function updateKernelSequence() {
   $('#big-editor').css('display', 'none');
   name = $('#editor-kernel-sequence-name').val();
-  console.log('Name', name);
   threshold = $('#editor-kernel-sequence-threshold').val();
-  console.log('Threshold', threshold);
   cells_container = $('.editor-kernel-cell');
   kernels_number = cells_container.length / 4;
-  kernels = [];
+  new_kernels = [];
   for (var i = 0; i < kernels_number; i++) {
-    kernels.push([]);
-    kernels[i].push(cells_container[i*4].value);
-    kernels[i].push(cells_container[i*4 + 1].value);
-    kernels[i].push(cells_container[i*4 + 2].value);
-    kernels[i].push(cells_container[i*4 + 3].value);
+    new_kernels.push([]);
+    new_kernels[i].push(cells_container[i*4].value);
+    new_kernels[i].push(cells_container[i*4 + 1].value);
+    new_kernels[i].push(cells_container[i*4 + 2].value);
+    new_kernels[i].push(cells_container[i*4 + 3].value);
   }
   relations_container = $('.editor-relation-button.active');
   relations = ['.'];
   for (var i = 0; i <  relations_container.length; i++) {
     relations.push(relations_container[i].value);
   }
-  console.log('Relations', relations);
-  console.log('Kernels', kernels);
   $.ajax({
     url: host + 'kernel_sequence',
     data: JSON.stringify({
@@ -1079,30 +1267,49 @@ function updateKernelSequence() {
       extension: extension_to_send,
       file: file_to_send,
       threshold: parseInt(threshold),
-      kernels: kernels,
+      kernels: new_kernels,
       relations: relations,
       number: kernels.length,
     }),
     dataType: 'json',
     method: 'POST',
     success: function (response) {
-      console.log('Success');
-      console.log('response', response);
       kernels_to_put = [];
       for (var i = 0; i < kernels_number; i++) {
         kernel = {
-          tl: kernels[i][0],
-          tr: kernels[i][1],
-          bl: kernels[i][2],
-          br: kernels[i][3],
+          tl: new_kernels[i][0],
+          tr: new_kernels[i][1],
+          bl: new_kernels[i][2],
+          br: new_kernels[i][3],
         }
         kernels_to_put.push(kernel);
       }
       kernel_sequences[active_kernel_sequence] = {threshold: parseInt(threshold), kernels: kernels_to_put, relations: relations, number: active_kernel_sequence, name: name};
-      console.log('K Seq', kernel_sequences);
       kernel_sequences[active_kernel_sequence].total_active = response.total_active_seq;
       activation_sequences_list[active_kernel_sequence] = response.activation_sequences;
-      console.log('Act seq current', active_kernel_sequence);
+      this_act_sequences = activation_sequences_list[active_kernel_sequence].activation_sequences;
+      kernel_sequence = kernel_sequences[active_kernel_sequence];
+      for (act_seq_indx in this_act_sequences) {
+        activation_sequence = this_act_sequences[act_seq_indx];
+        highlight_size = 0;
+        for (act_indx in activation_sequence.activations) {
+          activation = activation_sequence.activations[act_indx];
+          relation_indx = parseInt(act_indx) + 1;
+          if (act_indx !== (kernel_sequences[active_kernel_sequence].kernels.length-1) && kernel_sequences[active_kernel_sequence].relations[relation_indx] === 'strict') {
+            for (row_indx in activation.area) {
+              highlight_size += activation.area[row_indx][0];
+            }
+          } else {
+            for (row_indx in activation.area) {
+              for (col_indx in activation.area[row_indx]) {
+                highlight_size += activation.area[row_indx][col_indx];
+              }
+            }
+          }
+        }
+        activation_sequence.td = (activation_sequence.number*highlight_size / total).toFixed(3);
+        activation_sequence.rd = (activation_sequence.number*highlight_size / kernel_sequence.total_active).toFixed(3);
+      }
       updateCustomization('kernel-sequence');
       changeKernelSequence(active_kernel_sequence);
       // editor_warnings = {
@@ -1121,7 +1328,6 @@ function closeEditor() {
 }
 
 function updateKernel() {
-  console.log('Kernels',kernels);
   $('#big-editor').css('display', 'none');
   name = $('#editor-kernel-name').val();
   threshold = $('#editor-kernel-threshold').val();
@@ -1148,7 +1354,6 @@ function updateKernel() {
       kernels[active_kernel] = {threshold: parseInt(threshold), tl: cells[0], tr: cells[1], bl: cells[2], br: cells[3], number: kernels[active_kernel].number, name: name};
       kernels[active_kernel].total_active = response.total_active;
       activations_list[active_kernel] = response.activations;
-      console.log('List', activations_list);
       for (act_indx in activations_list) {
         activations = activations_list[act_indx].activations;
         for (act_indx in activations) {
@@ -1196,7 +1401,6 @@ function getKernel(kernel) {
 }
 
 function getKernelSequence(kernel_sequence) {
-  console.log(kernel_sequence);
   k = '<div class="kernel-sequence-container" clickable id="kernel-sequence-' + kernel_sequence.number + '" onclick="changeKernelSequence(' + kernel_sequence.number + ')">';
   k += '<div class="kernel-sequence-info">';
   k += '<p>' + trunc(kernel_sequence.name) + '</p>';
@@ -1216,7 +1420,6 @@ function getKernelSequence(kernel_sequence) {
     k += '</div>';
     if (i != k_seq_length - 1) {
       k+= '<div class="relation">';
-      console.log('Seq relation', seq_relations[i]);
         if (seq_relations[i+1] === 'strict') {
           k += '&#10233;'
         } else {
@@ -1256,11 +1459,10 @@ function changeKernelSequence(kernel_seq_num) {
   $(previous_k_s_id).removeClass('active');
   k_s_id = '#kernel-sequence-' + kernel_seq_num;
   $(k_s_id).addClass('active');
-  console.log('active seq', active_kernel_sequence);
-  console.log('passed seq', kernel_seq_num);
   active_kernel_sequence = kernel_seq_num;
   activation_sequences = activation_sequences_list[active_kernel_sequence].activation_sequences;
   activation_sequences_before_sorting = clone(activation_sequences);
+  console.log('Before sorting',activation_sequences_before_sorting);
   highlight = activation_sequences_list[active_kernel_sequence].highlight;
   getActivationSequences(kernel_seq_num);
   current_highlight = clone(highlight);
@@ -1277,19 +1479,39 @@ function changeKernelSequence(kernel_seq_num) {
 }
 
 function sortActivationsByPerformer() {
-  // TODO: Check if need sorting by second, third or fourth element
+  console.log('kernel', kernels[active_kernel]);
+  this_kernel = kernels[active_kernel];
   row_to_sort_by = 0;
   element_to_sort_by = 0;
+  if (this_kernel.tl === '*') {
+    element_to_sort_by += 1;
+    if (this_kernel.tr === '*') {
+      row_to_sort_by += 1;
+      element_to_sort_by = 0;
+      if (this_kernel.bl === '*') {
+        element_to_sort_by += 1;
+      }
+    }
+  }
+  console.log(row_to_sort_by, element_to_sort_by);
   let sorting_list = [];
   colors_list = Object.values(colors);
   for (let i = 0; i < Object.values(colors).length; i++) {
     sorting_list.push([]);
   }
+  // Add one more list to include border elements
+  sorting_list.push([]);
   for (act_indx in activations) {
     activation = activations[act_indx];
+    console.log(activation);
     color = activation.matrix[row_to_sort_by][element_to_sort_by][1];
+    console.log(color);
     index_to_put = colors_list.indexOf(color);
-    sorting_list[index_to_put].push(activation);
+    if (index_to_put === -1) {
+      sorting_list[sorting_list.length - 1].push(activation);
+    } else {
+      sorting_list[index_to_put].push(activation);
+    }
   }
   return [].concat.apply([], sorting_list);
 }
@@ -1316,17 +1538,35 @@ function sortActivationSequencesByPerformer() {
 }
 
 function sortActivationsByActivity() {
-  // TODO: Check if need sorting by second, third or fourth element
+  console.log('kernel', kernels[active_kernel]);
+  this_kernel = kernels[active_kernel];
   row_to_sort_by = 0;
   element_to_sort_by = 0;
+  if (this_kernel.tl === '*') {
+    element_to_sort_by += 1;
+    if (this_kernel.tr === '*') {
+      row_to_sort_by += 1;
+      element_to_sort_by = 0;
+      if (this_kernel.bl === '*') {
+        element_to_sort_by += 1;
+      }
+    }
+  }
+  console.log(row_to_sort_by, element_to_sort_by);
   let sorting_list = [];
   for (let i = 0; i < Object.keys(shapes).length; i++) {
     sorting_list.push([]);
   }
+  // Add one more list to include border elements
+  sorting_list.push([]);
   for (act_indx in activations) {
     activation = activations[act_indx];
     index_to_put = parseInt((activation.matrix[row_to_sort_by][element_to_sort_by][0].slice(1,2))) - 1;
-    sorting_list[index_to_put].push(activation);
+    if (index_to_put === -1) {
+      sorting_list[sorting_list.length - 1].push(activation);
+    } else {
+      sorting_list[index_to_put].push(activation);
+    }
   }
   return [].concat.apply([], sorting_list);
 }
@@ -1351,8 +1591,6 @@ function sortActivationSequencesByActivity() {
 }
 
 function sortActivationsByDensity(what) {
-  console.log('Act list', activations_list);
-
   var len = activations_list[active_kernel].activations.length;
   new_list = clone(activations_list[active_kernel].activations);
   for (var i = len-1; i>=0; i--){
@@ -1367,18 +1605,20 @@ function sortActivationsByDensity(what) {
   return new_list;
 }
 
-function bubbleSort(arr){
-   var len = arr.length;
-   for (var i = len-1; i>=0; i--){
-     for(var j = 1; j<=i; j++){
-       if(arr[j-1]>arr[j]){
-           var temp = arr[j-1];
-           arr[j-1] = arr[j];
-           arr[j] = temp;
-        }
-     }
-   }
-   return arr;
+function sortActivationSequencesByDensity(what) {
+  var len = activation_sequences_list[active_kernel_sequence].activation_sequences.length;
+  new_list = clone(activation_sequences_list[active_kernel_sequence].activation_sequences);
+  console.log(activation_sequences_list[active_kernel_sequence].activation_sequences);
+  for (var i = len-1; i>=0; i--){
+    for(var j = 1; j<=i; j++){
+      if(new_list[j-1][what] < new_list[j][what]){
+          var temp = new_list[j-1];
+          new_list[j-1] = new_list[j];
+          new_list[j] = temp;
+       }
+    }
+  }
+  return new_list;
 }
 
 function getActivations(kernel_num) {
@@ -1412,6 +1652,8 @@ function getActivationSequences(kernel_seq_num) {
     act_sequences = sortActivationSequencesByPerformer();
   } else if (activation_sequences_sorting === 'activity') {
     act_sequences = sortActivationSequencesByActivity();
+  } else if (activation_sequences_sorting === 'td') {
+    act_sequences = sortActivationSequencesByDensity('td');
   } else {
     act_sequences = activation_sequences_before_sorting;
   }
@@ -1419,7 +1661,6 @@ function getActivationSequences(kernel_seq_num) {
   $('#activations').append('<div id="activation-sequences-list"></div>');
   for (act_seq_indx in act_sequences) {
     act_sequence = act_sequences[act_seq_indx];
-    console.log('each', act_sequence);
     $('#activation-sequences-list').append(getActivationSequence(act_sequence, act_seq_indx, kernel_seq_num));
   }
 }
@@ -1472,7 +1713,6 @@ function getActiovationsPanel(kernel_num) {
 }
 
 function changeSorting(num) {
-  console.log('Change');
   if (num === 0) {
     sorting = 'no-sorting';
   } else if (num === 1) {
@@ -1536,7 +1776,6 @@ function getActiovationSequencePanel(kernel_seq_num) {
 }
 
 function changeSequenceSorting(num) {
-  console.log('Change');
   if (num === 0) {
     sorting = 'no-sorting';
   } else if (num === 1) {
@@ -1595,24 +1834,8 @@ function getActivationSequence(activation_sequence, activation_sequence_number, 
   }
   k += '</div>';
   k += '<div class="activation-sequence-info">';
-  highlight_size = 0;
-  for (act_indx in activation_sequence.activations) {
-    activation = activation_sequence.activations[act_indx];
-    relation_indx = parseInt(act_indx) + 1;
-    if (act_indx !== (kernel_sequences[kernel_sequence_number].kernels.length-1) && kernel_sequences[kernel_sequence_number].relations[relation_indx] === 'strict') {
-      for (row_indx in activation.area) {
-        highlight_size += activation.area[row_indx][0];
-      }
-    } else {
-      for (row_indx in activation.area) {
-        for (col_indx in activation.area[row_indx]) {
-          highlight_size += activation.area[row_indx][col_indx];
-        }
-      }
-    }
-  }
-  k += '<p><span>TD:</span> ' + (activation_sequence.number*highlight_size / total).toFixed(3) + '</p>';
-  k += '<p><span>RD:</span> ' + (activation_sequence.number*highlight_size / kernel_sequence.total_active).toFixed(3) + '</p>';
+  k += '<p><span>TD:</span> ' + activation_sequence.td + '</p>';
+  k += '<p><span>RD:</span> ' + activation_sequence.rd + '</p>';
   k += '</div>';
   k += '<div class="activation-visibility">'
   if (activation_sequence.highlighted) {
@@ -1720,7 +1943,6 @@ function toggleActivation(act_indx) {
 
 function toggleActivationSequence(act_seq_indx) {
   activation_sequence = activation_sequences_list[active_kernel_sequence].activation_sequences[act_seq_indx];
-  console.log(activation_sequence);
   for (act_indx in activation_sequence.activations) {
     activation = activation_sequence.activations[act_indx];
     coords = activation.coords;
@@ -1796,6 +2018,5 @@ function restoreWSA() {
 
 function redraw() {
   var svg = drawWSA(wsa.matrix, wsa.nrows, wsa.ncols, current_highlight);
-  console.log('current_highlight', current_highlight);
   $('#artifact-container').empty().append(svg);
 }
